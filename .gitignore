@@ -1,0 +1,5 @@
+render/
+.tools/
+*.bak
+rclone.conf
+sealed-secrets-chave.yaml

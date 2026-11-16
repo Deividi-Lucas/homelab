@@ -1,0 +1,23 @@
+# "App de apps": o Argo CD aplica tudo que está em platform/ e os arquivos *.yaml de apps/
+# (inclusive este, então a raiz também é gerida pelo Git).
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: root
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/Deividi-Lucas/homelab.git
+    targetRevision: main
+    path: .
+    directory:
+      recurse: true
+      include: "{platform/*.yaml,apps/*.yaml}"
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: argocd
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true

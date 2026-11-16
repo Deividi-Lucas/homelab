@@ -1,0 +1,17 @@
+# SUBSTITUIR: gerado com kubeseal (ver README, "Segredos"). Este arquivo de exemplo não abre em nenhum cluster.
+apiVersion: bitnami.com/v1alpha1
+kind: SealedSecret
+metadata:
+  name: operator-oauth
+  namespace: tailscale
+  annotations:
+    argocd.argoproj.io/sync-wave: "2"
+    argocd.argoproj.io/sync-options: SkipDryRunOnMissingResource=true
+spec:
+  encryptedData:
+    client_id: SUBSTITUIR_PELO_KUBESEAL
+    client_secret: SUBSTITUIR_PELO_KUBESEAL
+  template:
+    metadata:
+      name: operator-oauth
+      namespace: tailscale

@@ -1,0 +1,32 @@
+name: validar
+on:
+  pull_request:
+  push:
+    branches: [main]
+permissions:
+  contents: read
+jobs:
+  manifestos:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Instalar kubeconform v0.8.0
+        run: |
+          curl -fsSL -o kubeconform.tar.gz https://github.com/yannh/kubeconform/releases/download/v0.8.0/kubeconform-linux-amd64.tar.gz
+          echo "9bc2bffbf71f261128533edaf912153948b7ff238f9a531ae6d34466ec287883  kubeconform.tar.gz" | sha256sum -c -
+          tar -xzf kubeconform.tar.gz kubeconform
+      - name: Montar e validar
+        run: |
+          set -euo pipefail
+          mkdir -p render
+          for app in apps/*/; do
+            kubectl kustomize "$app" > "render/$(basename "$app").yaml"
+          done
+          ./kubeconform -strict -summary \
+            -schema-location default \
+            -schema-location 'https://raw.githubusercontent.com/datreeio/CRDs-catalog/main/{{.Group}}/{{.ResourceKind}}_{{.ResourceAPIVersion}}.json' \
+            render/*.yaml platform/*.yaml apps/*.yaml
+      - name: Script de bootstrap
+        run: bash -n bootstrap/instalar-k3s.sh
