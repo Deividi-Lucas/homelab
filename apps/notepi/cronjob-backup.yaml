@@ -1,0 +1,84 @@
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: notepi-backup
+spec:
+  schedule: "0 3 * * *"
+  timeZone: America/Sao_Paulo
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 1
+      template:
+        metadata:
+          labels:
+            app.kubernetes.io/name: notepi
+            app.kubernetes.io/component: backup
+        spec:
+          restartPolicy: Never
+          automountServiceAccountToken: false
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 10001
+            runAsGroup: 10001
+            fsGroup: 10001
+            seccompProfile:
+              type: RuntimeDefault
+          initContainers:
+            # 1) lixeira antiga + backup no pendrive + rotação de 30 dias
+            - name: backup-local
+              image: ghcr.io/deividi-lucas/notepi
+              command: ["python", "-m", "notepi.manutencao"]
+              envFrom:
+                - configMapRef:
+                    name: notepi
+              resources:
+                requests: {cpu: 50m, memory: 64Mi}
+                limits: {memory: 256Mi}
+              securityContext:
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
+                capabilities: {drop: ["ALL"]}
+              volumeMounts:
+                - {name: dados, mountPath: /dados}
+                - {name: backup, mountPath: /backup}
+                - {name: tmp, mountPath: /tmp}
+          containers:
+            # 2) cópia para a nuvem, criptografada (remote "cofre")
+            - name: nuvem
+              image: rclone/rclone:1.76.0@sha256:7cbeec24a44f206067597c0368be4de90ae19a64d5113c7d1938bd737a81e466
+              command: ["sh", "-c"]
+              args:
+                # o rclone grava o token renovado; o Secret é só leitura, então copia para /tmp
+                - >-
+                  cp /segredo/rclone.conf /tmp/rclone.conf &&
+                  rclone copy /backup cofre:backup --include "notas-*.db" --max-age 48h
+                  --config /tmp/rclone.conf --cache-dir /tmp/cache
+              resources:
+                requests: {cpu: 50m, memory: 64Mi}
+                limits: {memory: 256Mi}
+              securityContext:
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
+                capabilities: {drop: ["ALL"]}
+              volumeMounts:
+                - {name: backup, mountPath: /backup, readOnly: true}
+                - {name: rclone, mountPath: /segredo, readOnly: true}
+                - {name: tmp, mountPath: /tmp}
+          volumes:
+            - name: dados
+              persistentVolumeClaim:
+                claimName: notepi-dados
+            - name: backup
+              hostPath:
+                path: /mnt/backup
+                type: Directory
+            - name: rclone
+              secret:
+                secretName: notepi-rclone
+            - name: tmp
+              emptyDir:
+                medium: Memory
+                sizeLimit: 64Mi

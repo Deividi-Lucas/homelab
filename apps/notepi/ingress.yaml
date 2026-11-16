@@ -1,0 +1,14 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: notepi
+spec:
+  ingressClassName: tailscale
+  defaultBackend:
+    service:
+      name: notepi
+      port:
+        name: http
+  tls:
+    - hosts:
+        - notepi   # o operador completa com o domínio do seu tailnet
