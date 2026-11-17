@@ -3,9 +3,9 @@ kind: Deployment
 metadata:
   name: finpi
 spec:
-  # 0 durante a migração do banco do Pi 3 (README do homelab, "Migrar o FinPi"); depois 1.
-  # SQLite: nunca mais de uma réplica.
-  replicas: 0
+  # SQLite: um processo escrevendo, nunca mais de uma réplica.
+  # (Fica 0 só durante uma migração de banco: README do homelab, "Migrar o FinPi".)
+  replicas: 1
   strategy:
     type: Recreate       # derruba a versão antiga antes de subir a nova
   selector:
