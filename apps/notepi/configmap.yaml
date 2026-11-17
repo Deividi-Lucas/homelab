@@ -7,7 +7,7 @@ data:
   NOTEPI_BACKUP_DIR: /backup
   NOTEPI_BACKUP_EXIGIR_MONTAGEM: "0"
   NOTEPI_BACKUP_MARCADOR: "1"
-  # SUBSTITUIR "SEU-TAILNET" pelo nome do seu tailnet (painel do Tailscale → DNS), ex.: tail1234.ts.net
-  NOTEPI_HOSTS: notepi.SEU-TAILNET.ts.net
+  # Nome do tailnet (painel do Tailscale → DNS). É público nos registros de certificados.
+  NOTEPI_HOSTS: notepi.tail8fb69e.ts.net
   # Logins do Tailscale autorizados. Vazio = qualquer aparelho que a ACL deixar passar (ver README).
   NOTEPI_USUARIOS: ""
