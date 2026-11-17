@@ -68,6 +68,15 @@ CONFIG
 if ! command -v k3s >/dev/null 2>&1 || ! k3s --version | grep -qF "$K3S_VERSAO"; then
   curl -sfL https://get.k3s.io | INSTALL_K3S_VERSION="$K3S_VERSAO" sh -
 fi
+# Se o k3s já existia, ele ainda roda com a configuração antiga: reinicia uma vez para aplicar
+# (por exemplo, remover o Traefik). O hash guardado evita reinícios desnecessários nas próximas vezes.
+APLICADA=/var/lib/rancher/k3s/.homelab-config-aplicada
+HASH_CONFIG="$(sha256sum /etc/rancher/k3s/config.yaml | cut -d' ' -f1)"
+if [ "$(cat "$APLICADA" 2>/dev/null)" != "$HASH_CONFIG" ]; then
+  echo "    aplicando a configuração do k3s (reiniciando o serviço)"
+  systemctl restart k3s
+  echo "$HASH_CONFIG" > "$APLICADA"
+fi
 export KUBECONFIG=/etc/rancher/k3s/k3s.yaml
 until kubectl get nodes 2>/dev/null | grep -q ' Ready'; do sleep 5; done
 

@@ -3,3 +3,4 @@ render/
 *.bak
 rclone.conf
 sealed-secrets-chave.yaml
+selo.pem

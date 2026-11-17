@@ -94,14 +94,24 @@ O operador do Tailscale só fica saudável depois do passo 6 (ele precisa do seg
 Os segredos vão para o Git **criptografados**; só este cluster consegue abrir. Os comandos abaixo rodam no Pi
 (o bootstrap já instalou o `kubeseal`). Use `read -s` para a senha não ficar no histórico do terminal.
 
+Antes, confira que o Sealed Secrets está rodando (`sudo kubectl get pods -n kube-system | grep sealed`) e salve o
+**certificado público** dele. Ele não é segredo: só tranca, não abre. Assim o `kubeseal` não precisa falar com o
+cluster (e não esbarra na configuração do `kubectl`):
+```bash
+sudo kubectl -n kube-system get secret -l sealedsecrets.bitnami.com/sealed-secrets-key \
+  -o jsonpath='{.items[0].data.tls\.crt}' | base64 -d > ~/selo.pem
+head -1 ~/selo.pem      # -----BEGIN CERTIFICATE-----
+```
+
 **OAuth do operador do Tailscale:**
 ```bash
 read -rp "Client ID: " ID; read -rsp "Client secret: " SEGREDO; echo
 sudo kubectl create secret generic operator-oauth -n tailscale \
   --from-literal=client_id="$ID" --from-literal=client_secret="$SEGREDO" \
   --dry-run=client -o yaml \
-  | sudo kubeseal --format yaml > platform/tailscale-oauth.yaml
+  | kubeseal --cert ~/selo.pem --format yaml > platform/tailscale-oauth.yaml
 unset ID SEGREDO
+grep -A3 encryptedData platform/tailscale-oauth.yaml    # valores longos começando com "Ag"
 ```
 
 **Backup na nuvem do NotePi** (rclone com escopo `drive.file` + criptografia `crypt`, como no README do NotePi):
@@ -109,7 +119,7 @@ crie o `rclone.conf` no PC com os remotes `gdrive` e `cofre`, copie para o Pi e:
 ```bash
 sudo kubectl create secret generic notepi-rclone -n notepi \
   --from-file=rclone.conf=./rclone.conf --dry-run=client -o yaml \
-  | sudo kubeseal --format yaml > apps/notepi/sealedsecret-rclone.yaml
+  | kubeseal --cert ~/selo.pem --format yaml > apps/notepi/sealedsecret-rclone.yaml
 shred -u ./rclone.conf
 ```
 
@@ -118,7 +128,12 @@ Depois de gerar os dois arquivos, devolva as anotações do Argo CD que o `kubes
   `argocd.argoproj.io/sync-wave: "2"` e `argocd.argoproj.io/sync-options: SkipDryRunOnMissingResource=true`;
 - em `apps/notepi/sealedsecret-rclone.yaml`: `argocd.argoproj.io/sync-options: SkipDryRunOnMissingResource=true`.
 
-Faça commit e push dos dois arquivos (do Pi ou do PC). O Argo CD aplica sozinho.
+Para não precisar de login do GitHub no Pi, traga os arquivos para o PC (são criptografados, pode copiar à vontade)
+e faça commit e push de lá:
+```powershell
+scp <usuario>@<ip-do-pi>:~/homelab/platform/tailscale-oauth.yaml C:\caminho\do\homelab\platform\
+```
+O Argo CD aplica sozinho em até 3 minutos.
 
 **Guarde a chave do Sealed Secrets** (sem ela, um cartão novo não abre os segredos do Git):
 ```bash
