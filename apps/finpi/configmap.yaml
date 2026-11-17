@@ -1,0 +1,11 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: finpi
+data:
+  HOST: 0.0.0.0
+  PORT: "8080"
+  DB_PATH: /dados/finpi.db
+  # Mesmos limites usados no Raspberry Pi 3: Go devolve memória cedo e o pod fica bem abaixo do limite.
+  GOMEMLIMIT: 40MiB
+  GOGC: "50"

@@ -1,0 +1,121 @@
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: finpi-backup
+spec:
+  schedule: "30 3 * * *"
+  timeZone: America/Sao_Paulo
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 1
+      template:
+        metadata:
+          labels:
+            app.kubernetes.io/name: finpi
+            app.kubernetes.io/component: backup
+        spec:
+          restartPolicy: Never
+          automountServiceAccountToken: false
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 10002
+            runAsGroup: 10002
+            fsGroup: 10002
+            seccompProfile:
+              type: RuntimeDefault
+          initContainers:
+            # 1) backup no pendrive com a API de backup do SQLite (segura com o FinPi rodando),
+            #    conferência de integridade e rotação de 30 dias
+            - name: backup-local
+              image: python:3.12-slim@sha256:5e2bdb1b0d542d5039cffb8181c65930093949194a65c365dfb1b0fe13a4fa5b
+              command: ["python", "-c"]
+              args:
+                - |
+                  import datetime, sqlite3, sys
+                  from pathlib import Path
+                  banco = Path("/dados/finpi.db")
+                  raiz = Path("/backup")
+                  if not (raiz / ".notepi-pendrive").is_file():
+                      sys.exit("pendrive de backup ausente (arquivo .notepi-pendrive não encontrado em /backup)")
+                  if not banco.is_file():
+                      sys.exit("banco do FinPi não encontrado em /dados/finpi.db")
+                  destino = raiz / "finpi"
+                  destino.mkdir(exist_ok=True)
+                  hoje = datetime.date.today()
+                  final = destino / f"finpi-{hoje.isoformat()}.db"
+                  temporario = final.with_name(final.name + ".tmp")
+                  temporario.unlink(missing_ok=True)
+                  origem = sqlite3.connect(banco)
+                  copia = sqlite3.connect(temporario)
+                  origem.backup(copia)
+                  origem.close()
+                  copia.execute("PRAGMA journal_mode=DELETE")
+                  ok = copia.execute("PRAGMA integrity_check").fetchone()[0]
+                  copia.close()
+                  if ok != "ok":
+                      temporario.unlink()
+                      sys.exit(f"o backup saiu corrompido: {ok}")
+                  temporario.replace(final)
+                  corte = hoje - datetime.timedelta(days=30)
+                  for arquivo in destino.glob("finpi-*.db"):
+                      try:
+                          if datetime.date.fromisoformat(arquivo.stem.removeprefix("finpi-")) <= corte:
+                              arquivo.unlink()
+                              print("removido", arquivo.name)
+                      except ValueError:
+                          pass
+                  print("backup:", final)
+              env:
+                - {name: PYTHONDONTWRITEBYTECODE, value: "1"}
+              resources:
+                requests: {cpu: 20m, memory: 32Mi}
+                limits: {memory: 128Mi}
+              securityContext:
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
+                capabilities: {drop: ["ALL"]}
+              volumeMounts:
+                - {name: dados, mountPath: /dados}
+                - {name: backup, mountPath: /backup}
+                - {name: tmp, mountPath: /tmp}
+          containers:
+            # 2) cópia para a nuvem, criptografada (remote "cofre"), quando o Secret existir
+            - name: nuvem
+              image: rclone/rclone:1.76.0@sha256:7cbeec24a44f206067597c0368be4de90ae19a64d5113c7d1938bd737a81e466
+              command: ["sh", "-c"]
+              args:
+                - >-
+                  if [ ! -f /segredo/rclone.conf ]; then echo "nuvem não configurada: só o backup no pendrive"; exit 0; fi;
+                  cp /segredo/rclone.conf /tmp/rclone.conf &&
+                  rclone copy /backup/finpi cofre:backup/finpi --include "finpi-*.db" --max-age 48h
+                  --config /tmp/rclone.conf --cache-dir /tmp/cache
+              resources:
+                requests: {cpu: 50m, memory: 64Mi}
+                limits: {memory: 256Mi}
+              securityContext:
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
+                capabilities: {drop: ["ALL"]}
+              volumeMounts:
+                - {name: backup, mountPath: /backup, readOnly: true}
+                - {name: rclone, mountPath: /segredo, readOnly: true}
+                - {name: tmp, mountPath: /tmp}
+          volumes:
+            - name: dados
+              persistentVolumeClaim:
+                claimName: finpi-dados
+            - name: backup
+              hostPath:
+                path: /mnt/backup
+                type: Directory
+            - name: rclone
+              secret:
+                secretName: finpi-rclone
+                optional: true
+            - name: tmp
+              emptyDir:
+                medium: Memory
+                sizeLimit: 64Mi

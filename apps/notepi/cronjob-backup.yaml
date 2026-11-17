@@ -51,8 +51,10 @@ spec:
               image: rclone/rclone:1.76.0@sha256:7cbeec24a44f206067597c0368be4de90ae19a64d5113c7d1938bd737a81e466
               command: ["sh", "-c"]
               args:
-                # o rclone grava o token renovado; o Secret é só leitura, então copia para /tmp
+                # Sem o Secret notepi-rclone (nuvem ainda não configurada), só avisa: o backup no pendrive já foi feito.
+                # O rclone grava o token renovado; o Secret é só leitura, então copia para /tmp.
                 - >-
+                  if [ ! -f /segredo/rclone.conf ]; then echo "nuvem não configurada: só o backup no pendrive"; exit 0; fi;
                   cp /segredo/rclone.conf /tmp/rclone.conf &&
                   rclone copy /backup cofre:backup --include "notas-*.db" --max-age 48h
                   --config /tmp/rclone.conf --cache-dir /tmp/cache
@@ -78,6 +80,7 @@ spec:
             - name: rclone
               secret:
                 secretName: notepi-rclone
+                optional: true
             - name: tmp
               emptyDir:
                 medium: Memory

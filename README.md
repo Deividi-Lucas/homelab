@@ -9,7 +9,13 @@ Tudo o que roda no Pi está descrito aqui; o Argo CD aplica sozinho o que estive
 | `platform/` | Componentes da plataforma: Sealed Secrets, operador do Tailscale, acesso ao Argo CD |
 | `apps/` | `root.yaml` (o "app de apps") e uma pasta por serviço |
 
-Serviços: **NotePi** (`apps/notepi/`) — anotações; o código fica em https://github.com/Deividi-Lucas/NotePi.
+Serviços:
+- **NotePi** (`apps/notepi/`) — anotações; código em https://github.com/Deividi-Lucas/NotePi;
+  `https://notepi.<tailnet>.ts.net`; backup às 03:00 em `pendrive/notas-AAAA-MM-DD.db`.
+- **FinPi** (`apps/finpi/`) — finanças; código em https://github.com/Deividi-Lucas/FinPi;
+  `https://finpi.<tailnet>.ts.net`; backup às 03:30 em `pendrive/finpi/finpi-AAAA-MM-DD.db`.
+
+Os dois backups exigem o marcador `.notepi-pendrive` na raiz do pendrive e guardam 30 dias.
 
 ## Versões fixadas
 
@@ -114,19 +120,26 @@ unset ID SEGREDO
 grep -A3 encryptedData platform/tailscale-oauth.yaml    # valores longos começando com "Ag"
 ```
 
-**Backup na nuvem do NotePi** (rclone com escopo `drive.file` + criptografia `crypt`, como no README do NotePi):
-crie o `rclone.conf` no PC com os remotes `gdrive` e `cofre`, copie para o Pi e:
+**Backup na nuvem (opcional, NotePi e FinPi)** — rclone com escopo `drive.file` + criptografia `crypt`, como no
+README do NotePi. Enquanto não existir, os CronJobs fazem só o backup no pendrive e avisam "nuvem não configurada".
+Crie o `rclone.conf` no PC com os remotes `gdrive` e `cofre`, copie para o Pi e gere um segredo por app
+(os segredos são de um namespace só, por isso dois arquivos com o mesmo conteúdo):
 ```bash
-sudo kubectl create secret generic notepi-rclone -n notepi \
-  --from-file=rclone.conf=./rclone.conf --dry-run=client -o yaml \
-  | kubeseal --cert ~/selo.pem --format yaml > apps/notepi/sealedsecret-rclone.yaml
+for app in notepi finpi; do
+  sudo kubectl create secret generic "$app-rclone" -n "$app" \
+    --from-file=rclone.conf=./rclone.conf --dry-run=client -o yaml \
+    | kubeseal --cert ~/selo.pem --format yaml > "/tmp/$app-rclone.yaml" \
+    && mv "/tmp/$app-rclone.yaml" "apps/$app/sealedsecret-rclone.yaml"
+done
 shred -u ./rclone.conf
 ```
+Depois, em `apps/notepi/kustomization.yaml` e `apps/finpi/kustomization.yaml`, troque a linha de comentário
+`# sealedsecret-rclone.yaml entra aqui...` por `  - sealedsecret-rclone.yaml`.
 
-Depois de gerar os dois arquivos, devolva as anotações do Argo CD que o `kubeseal` não copia:
+Depois de gerar os arquivos, devolva as anotações do Argo CD que o `kubeseal` não copia:
 - em `platform/tailscale-oauth.yaml`, em `metadata.annotations`:
   `argocd.argoproj.io/sync-wave: "2"` e `argocd.argoproj.io/sync-options: SkipDryRunOnMissingResource=true`;
-- em `apps/notepi/sealedsecret-rclone.yaml`: `argocd.argoproj.io/sync-options: SkipDryRunOnMissingResource=true`.
+- em `apps/*/sealedsecret-rclone.yaml`: `argocd.argoproj.io/sync-options: SkipDryRunOnMissingResource=true`.
 
 Para não precisar de login do GitHub no Pi, traga os arquivos para o PC (são criptografados, pode copiar à vontade)
 e faça commit e push de lá:
@@ -181,8 +194,41 @@ sudo kubectl top pods -A                 # plataforma em torno de 1,1 GB no tota
    (troque `AAAA-MM-DD` pela data do backup; se o pendrive também se perdeu, baixe antes de `cofre:backup` com o
    rclone no PC e copie para `/mnt/backup`.)
 
+## Migrar o FinPi do Pi 3 (uma vez)
+O FinPi sobe no cluster com **0 réplicas** (`apps/finpi/deployment.yaml`) só para criar o volume. Com o FinPi parado,
+o banco antigo é copiado para o volume, e depois a réplica vai para 1 (commit no homelab).
+
+1. **No Pi 3** — pare o atualizador e faça uma cópia consistente do banco:
+   ```bash
+   sudo systemctl stop finpi-update.timer
+   sudo python3 -c "import sqlite3; a=sqlite3.connect('/opt/finpi/data/finpi.db'); b=sqlite3.connect('/tmp/finpi-migrar.db'); a.backup(b); b.close(); a.close()"
+   sudo chmod 644 /tmp/finpi-migrar.db
+   scp /tmp/finpi-migrar.db deividi@<ip-do-pi4>:~/
+   ```
+2. **No Pi 4** — um pod auxiliar monta o volume do FinPi, recebe o arquivo e confere a integridade:
+   ```bash
+   sudo kubectl -n finpi run importar --restart=Never \
+     --image=python:3.12-slim@sha256:5e2bdb1b0d542d5039cffb8181c65930093949194a65c365dfb1b0fe13a4fa5b \
+     --overrides='{"spec":{"securityContext":{"runAsUser":10002,"runAsGroup":10002,"fsGroup":10002},"volumes":[{"name":"d","persistentVolumeClaim":{"claimName":"finpi-dados"}}],"containers":[{"name":"importar","image":"python:3.12-slim@sha256:5e2bdb1b0d542d5039cffb8181c65930093949194a65c365dfb1b0fe13a4fa5b","command":["sleep","3600"],"volumeMounts":[{"name":"d","mountPath":"/dados"}]}]}}'
+   sudo kubectl -n finpi wait --for=condition=Ready pod/importar --timeout=180s
+   sudo kubectl -n finpi cp ~/finpi-migrar.db importar:/dados/finpi-import.db
+   sudo kubectl -n finpi exec importar -- python -c "
+   import os, sqlite3
+   c = sqlite3.connect('/dados/finpi-import.db'); ok = c.execute('PRAGMA integrity_check').fetchone()[0]
+   t = [r[0] for r in c.execute(\"SELECT name FROM sqlite_master WHERE type='table'\")]; c.close()
+   print('integridade:', ok, '| tabelas:', ', '.join(sorted(t)))
+   assert ok == 'ok'
+   assert not os.path.exists('/dados/finpi.db'), 'já existe um finpi.db no volume; nada foi trocado'
+   os.replace('/dados/finpi-import.db', '/dados/finpi.db'); print('banco importado')"
+   sudo kubectl -n finpi delete pod importar
+   ```
+3. Troque `replicas: 0` por `replicas: 1` em `apps/finpi/deployment.yaml`, commit e push. Abra `https://finpi.<tailnet>.ts.net`.
+4. **No Pi 3**, com tudo conferido: `sudo systemctl disable --now finpi.service finpi-update.timer`
+   (o banco antigo fica em `/opt/finpi/data` como cópia de segurança).
+
 ## Comandos úteis
 - Estado do Argo CD: `sudo kubectl get applications -n argocd`
-- Logs do NotePi: `sudo kubectl -n notepi logs deploy/notepi`
-- Último backup: `sudo kubectl -n notepi get jobs`
+- Logs: `sudo kubectl -n notepi logs deploy/notepi` · `sudo kubectl -n finpi logs deploy/finpi`
+- Últimos backups: `sudo kubectl -n notepi get jobs` · `sudo kubectl -n finpi get jobs`
+- Rodar um backup agora: `sudo kubectl -n finpi create job --from=cronjob/finpi-backup teste-backup`
 - Forçar sincronização: no painel do Argo CD, botão **Sync**.

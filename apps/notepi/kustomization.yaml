@@ -13,7 +13,7 @@ resources:
   - ingress.yaml
   - networkpolicy.yaml
   - cronjob-backup.yaml
-  - sealedsecret-rclone.yaml
+  # sealedsecret-rclone.yaml entra aqui quando a nuvem for configurada (README, passo 6)
 images:
   # A CI do NotePi troca newTag e digest a cada versão publicada.
   - name: ghcr.io/deividi-lucas/notepi
