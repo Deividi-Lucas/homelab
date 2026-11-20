@@ -17,5 +17,5 @@ resources:
 images:
   # A CI do NotePi troca newTag e digest a cada versão publicada.
   - name: ghcr.io/deividi-lucas/notepi
-    newTag: sha-31ac9e9
-    digest: sha256:113805e3c9d3d5f5a970afa36a27e99a76a2b7cb3a423fe78053a33edf1504f3
+    newTag: sha-ec0eea5
+    digest: sha256:5a04a6cf6a0b08967e381749b41c394b9e5b62ef5f556c7244bc15bee43ec7fb
