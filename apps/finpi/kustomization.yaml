@@ -17,5 +17,5 @@ resources:
 images:
   # A CI do FinPi troca newTag e digest a cada versão publicada.
   - name: ghcr.io/deividi-lucas/finpi
-    newTag: sha-0660608
-    digest: sha256:3098aeaf868e830c10940cd18e6b4e36deb8850115560958e024ec25751fc20f
+    newTag: sha-63aca7a
+    digest: sha256:7917a719456d17455cd361a40cb9ec77c86ccfd19c40da38b466f2b90b6faeee
